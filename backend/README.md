@@ -1,42 +1,50 @@
-# 后端二模块
+# Deadline Keeper V2 后端
 
-本目录实现项目方案中后端二负责的数据库迁移、正式任务查询与编辑、匹配建议、确认保存及共用数据模型。`app.main` 是供联调的 FastAPI 入口，目前只注册后端二的路由；Agent 适配器已合并；录入、OCR 和分析调度仍需对接。
+本服务提供通知录入、规则脱敏、本地 PaddleOCR、Agent 任务提取、旧任务匹配、草稿检查和确认保存。录入与分析分成两个请求：只有用户确认后才写正式任务。当前用户由服务端配置的演示用户确定；当前实现是单进程、单用户演示，不提供登录认证。
 
-## 运行
+## 环境准备
 
-需要 Python 3.11+ 和 **Python 实际使用的 SQLite 3.51.3+**，数据库必须放在本地磁盘。先执行以下命令确认版本；系统 `sqlite3` 命令的版本不代表 Python 的版本：
+- Python 3.11 或以上，且 Python 实际连接的 SQLite 为 **3.51.3 或以上**。用 `python -c 'import sqlite3; print(sqlite3.sqlite_version)'` 检查；数据库放在本机磁盘。
+- 配置 OpenAI Chat Completions 兼容的模型服务：`LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`。适配器不自动加载 `.env`，请通过进程环境设置；不要提交密钥。
+- 安装 PaddleOCR 和本地中文模型。以下命令以 macOS/Linux 为例，Windows 使用对应的虚拟环境和环境变量设置方式：
 
 ```bash
-python -c 'import sqlite3; print(sqlite3.sqlite_version)'
 cd backend
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install -e '.[test]'
+python -m pip install -e '.[ocr,test]'
+mkdir -p models/paddleocr/det models/paddleocr/rec
+curl -L --fail https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-OCRv5_mobile_det_infer.tar | tar -x -C models/paddleocr/det --strip-components=1
+curl -L --fail https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-OCRv5_mobile_rec_infer.tar | tar -x -C models/paddleocr/rec --strip-components=1
 export DATABASE_URL=sqlite:///./data/deadline_keeper.db
+export OCR_MODEL_DIR=./models/paddleocr
+export LLM_BASE_URL='<模型服务基础地址>'
+export LLM_MODEL='<模型名称>'
+export LLM_API_KEY='<模型密钥>'
 alembic upgrade head
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
-环境变量参考 `.env.example`；应用从进程环境读取，不自动加载 `.env`。首次迁移后启动会创建配置指定的演示用户，已有用户与数据不会被清除。程序检查 SQLite 版本、WAL、迁移版本、用户 ID 和时区；低版本不会绕过校验。SQLite 每个连接启用外键、5 秒忙等待和 FULL 同步。服务仅按单进程、单演示用户设计，不提供认证。运行 `pytest -q` 使用临时 SQLite 数据库；测试显式跳过最低 SQLite 版本检查，不能据此推断运行环境满足部署要求。
+模型目录可放在其他本地位置，通过 `OCR_MODEL_DIR` 指定；目录下的 `det/` 和 `rec/` 分别对应 PP-OCRv5 mobile 检测和识别模型。首次启动会检查数据库迁移、配置和本地 OCR 模型，缺少依赖时启动失败。OCR 本身不需要联网，模型调用需要配置的服务可用。
 
-已提供接口：
+## 接口与流程
 
-- `GET /api/v1/tasks`：分页、查询和日期筛选。
-- `GET /api/v1/tasks/{task_id}`、`PATCH /api/v1/tasks/{task_id}`。
-- `POST /api/v1/imports/{import_id}/confirm`：`Idempotency-Key`、批量确认、版本检查和响应重放。
+1. `POST /api/v1/imports/text` 接收 JSON `text`，可选 `source_time` 和 `timezone`；或通过 `POST /api/v1/imports/image` 以 multipart 的 `file` 上传 PNG/JPEG 截图。成功返回导入 ID、脱敏正文和版本。
+2. `POST /api/v1/imports/{import_id}/analyze`，提交 `{"expected_version": 1}`。服务调用 Agent 提取、查询并匹配旧任务，返回 `ImportDetail` 和待检查草稿；`GET /api/v1/imports/{import_id}` 可查询后续状态。
+3. 用户检查并修改草稿后，调用 `POST /api/v1/imports/{import_id}/confirm`，提供 `Idempotency-Key` 和最终选择。该操作在单个数据库事务内保存，支持版本冲突检查和幂等重放。
+4. `GET /api/v1/tasks`、`GET /api/v1/tasks/{id}`、`PATCH /api/v1/tasks/{id}` 用于查看和编辑正式任务。`GET /health/live` 与 `GET /health/ready` 分别检查进程和本地依赖。
 
-具体请求与字段按项目的《Deadline Keeper V2 后端方案与接口文档》执行。请求体不接收用户 ID；当前用户只由服务端配置决定。任务不能通过匹配服务直接写入，需用户确认后保存。
+详细请求、响应和业务规则见仓库的 `docs/Deadline-Keeper-V2-后端方案.md`。规则脱敏覆盖邮箱、手机号、身份证号和带“学号”标签的编号，但不能保证识别全部敏感信息。当前截图本地 OCR；只有脱敏后的文本及候选任务发送给模型。失败时不把失败伪装成空任务结果，分析失败后可用新版本重试。
 
-## 给后端一和 Agent 负责人的对接约定
+## 验证
 
-- 数据库迁移是表结构的唯一来源；`app.models.reflect_models(engine)` 在迁移后提供五张表的 SQLAlchemy 映射类。`app.core.database.immediate_write_transaction(engine)` 用于要求 `BEGIN IMMEDIATE` 的短事务，同一 Session 不得跨线程使用或跨模型调用持有。
-- `app.schemas.task.TaskContent`、`app.schemas.review.ConfirmRequest` 和 `app.schemas.agent` 中的 `ExtractedTask`、`MatchBatchRequest`、`MatchBatchResult` 为共用数据模型。
-- 分析服务为每条提取结果生成唯一草稿 ID 后，调用 `await MatchingService(engine, agent, privacy_filter).suggest(user_id, [(draft_id, extracted_task), ...])`。返回列表与输入顺序一致；每项含 `suggested_action`、`matched_task_id`、`matched_task_version`、`proposed_task`、`match_details`。分析服务负责在同一事务里写入草稿和导入状态；匹配服务本身不写数据库。
-- 需要语义判断时，`agent` 必须提供 `async match_tasks(MatchBatchRequest)`，返回 `MatchBatchResult` 或同结构对象。`privacy_filter` 是同步函数，接收一份候选 `TaskView` 字典并返回已脱敏字典，须保留公开任务 ID、版本及匹配必要字段。原始候选快照只返回给本地用户；传入 Agent 的候选必须先脱敏。未配置时返回 `DEPENDENCY_NOT_READY`，不会伪造模型判断。
-- 调用方负责模型及整次分析的超时、并发控制、失败状态和事务边界。匹配服务区分有效的 `UNCERTAIN`、无效输出和模型调用失败，并拒绝未知候选 ID；候选超过五条时 `DIFFERENT` 保持 `REVIEW`。
-- 后端一在其主应用中挂载 `app.routers.tasks.router` 和 `app.routers.review.router`，并提供 `app.state.engine`、`app.state.user_id`，同时复用或合并 `app.main` 中的错误响应和请求 ID 处理。不要同时初始化两个独立数据库或信任客户端提交的用户 ID。
+在仓库根目录执行：
 
-数据库模型、任务和确认模块的自动化测试不替代截图 OCR、真实 LLM 和前后端全链路联调。实际部署应使用 SQLite 备份接口备份处于 WAL 模式的数据库。
+```bash
+PYTHONPATH=backend python -m pytest -q backend/tests
+```
+
+自动化测试使用临时数据库及模拟 Agent/OCR，测试代码显式跳过 SQLite 最低版本检查；它们不代替真实模型、真实截图和前后端全链路验收。备份运行中的 WAL 数据库应使用 SQLite 备份接口。
 
 ---
 
@@ -127,4 +135,4 @@ app = FastAPI(lifespan=lifespan)
 
 早期调用出现过字段组合校验失败，以及模型把“提交细节见链接”当作新要求。调整提示词并补充引用校验后，上表所列重跑全部通过。语义正确性仍取决于通知内容和模型表现，`UNCERTAIN` 和异常路径目前通过固定响应用例验证。公开样例属于联调验收，样本量不足以估计开题方案的字段准确率。
 
-本交付实现后端进程内接口和独立命令行验收入口。任务候选查询与确认保存已提供；V2 导入、分析调度和草稿保存仍需团队完成联调。
+本交付实现后端进程内接口和独立命令行验收入口。V2 导入、分析调度、匹配和确认保存接口已实现；真实外部模型以及前后端整体流程仍需在实际部署环境中完成联调。

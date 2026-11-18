@@ -182,3 +182,4 @@ cython_debug/
 # Local databases and macOS metadata
 backend/data/
 .DS_Store
+backend/models/
