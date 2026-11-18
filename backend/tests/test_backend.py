@@ -89,7 +89,7 @@ def test_tasks_http_filters_and_version(db):
 def test_identity_match_preserves_missing_fields_and_ambiguity(db):
     with immediate_write_transaction(db) as session:
         create_task(session, USER, TaskContent(**content()))
-    extracted = ExtractedTask.model_validate({**content(due_date='2026-11-23', requirements=None), 'observed_fields':['course_name','external_ref','deadline'], 'uncertain_fields':[], 'reason':'日期变化','source_excerpt':'日期改为 11 月 23 日'})
+    extracted = ExtractedTask.model_validate({**content(due_date='2026-11-23', requirements=None), 'observed_fields':['title','course_name','external_ref','deadline'], 'uncertain_fields':[], 'reason':'日期变化','source_excerpt':'日期改为 11 月 23 日'})
     result = asyncio.run(MatchingService(db).suggest(USER, [('draft', extracted)]))[0]
     assert result['suggested_action'] == 'UPDATE'
     assert result['proposed_task']['requirements'] == '上传 PDF'
@@ -109,10 +109,10 @@ def test_database_foreign_keys_prevent_cross_user_task(db):
 def test_agent_batch_uses_redacted_snapshots_and_validates_candidates(db):
     with immediate_write_transaction(db) as session:
         old = create_task(session, USER, TaskContent(**content(requirements='手机号 13800000000')))
-    extracted = ExtractedTask.model_validate({**content(external_ref=None), 'observed_fields':['title','course_name'], 'uncertain_fields':[], 'reason':'','source_excerpt':'safe'})
+    extracted = ExtractedTask.model_validate({**content(external_ref=None, requirements=None, due_kind='NONE', due_date=None), 'observed_fields':['title','course_name'], 'uncertain_fields':[], 'reason':'课程任务','source_excerpt':'safe'})
     class Agent:
         async def match_tasks(self, request):
-            assert request.items[0].candidate_tasks[0]['requirements'] == '[redacted]'
+            assert request.items[0].candidate_tasks[0].requirements == '[redacted]'
             return {'items':[{'draft_item_id':'draft', 'relation':'SAME', 'matched_task_id':old['id'], 'reason':'same', 'uncertain_fields':[]}]}
     def redact(candidate):
         candidate['requirements'] = '[redacted]'
@@ -130,7 +130,7 @@ def test_agent_batch_uses_redacted_snapshots_and_validates_candidates(db):
 def test_agent_failure_is_not_classified_as_invalid_output(db):
     with immediate_write_transaction(db) as session:
         create_task(session, USER, TaskContent(**content()))
-    extracted = ExtractedTask.model_validate({**content(external_ref=None), 'observed_fields':['title','course_name'], 'uncertain_fields':[], 'reason':'','source_excerpt':'safe'})
+    extracted = ExtractedTask.model_validate({**content(external_ref=None, requirements=None, due_kind='NONE', due_date=None), 'observed_fields':['title','course_name'], 'uncertain_fields':[], 'reason':'课程任务','source_excerpt':'safe'})
     class Agent:
         async def match_tasks(self, request):
             raise ConnectionError('service unavailable')
@@ -155,7 +155,7 @@ def test_truncated_candidates_cannot_be_classified_create(db):
     with immediate_write_transaction(db) as session:
         for i in range(6):
             create_task(session, USER, TaskContent(**content(title=f'作业 {i}', external_ref=f'编号 {i}')))
-    extracted = ExtractedTask.model_validate({**content(title='作业', external_ref=None), 'observed_fields':['title','course_name'], 'uncertain_fields':[], 'reason':'','source_excerpt':'safe'})
+    extracted = ExtractedTask.model_validate({**content(title='作业', external_ref=None, requirements=None, due_kind='NONE', due_date=None), 'observed_fields':['title','course_name'], 'uncertain_fields':[], 'reason':'课程任务','source_excerpt':'safe'})
     class Agent:
         async def match_tasks(self, request):
             return {'items':[{'draft_item_id':'draft', 'relation':'DIFFERENT', 'matched_task_id':None, 'reason':'不同', 'uncertain_fields':[]}]}
@@ -174,14 +174,14 @@ def test_idempotency_detects_changed_raw_request_even_if_normalized_values_match
 
 def test_normalized_content_hash_duplicate_does_not_suggest_update(db):
     with immediate_write_transaction(db) as session:
-        create_task(session, USER, TaskContent(**content(title='Report', external_ref='ML-03')))
-    task = ExtractedTask.model_validate({**content(title='report', external_ref='ml-03'), 'observed_fields':['title','description','course_name','external_ref','deadline','requirements'], 'uncertain_fields':[], 'reason':'','source_excerpt':'safe'})
+        create_task(session, USER, TaskContent(**content(title='Report', external_ref='ML-03', description='报告')))
+    task = ExtractedTask.model_validate({**content(title='report', external_ref='ml-03', description='报告'), 'observed_fields':['title','description','course_name','external_ref','deadline','requirements'], 'uncertain_fields':[], 'reason':'完整任务','source_excerpt':'safe'})
     result = asyncio.run(MatchingService(db).suggest(USER, [('draft', task)]))[0]
     assert result['suggested_action'] == 'DUPLICATE'
 
 
 def test_missing_title_and_unresolved_date_are_reviewable(db):
-    task = ExtractedTask.model_validate({**content(title=None, due_kind='UNRESOLVED', due_date=None), 'observed_fields':[], 'uncertain_fields':['deadline'], 'reason':'缺少时间','source_excerpt':'safe'})
+    task = ExtractedTask.model_validate({**content(title=None, course_name=None, external_ref=None, requirements=None, due_kind='UNRESOLVED', due_date=None), 'observed_fields':[], 'uncertain_fields':['title','deadline'], 'reason':'缺少时间','source_excerpt':'safe'})
     result = asyncio.run(MatchingService(db).suggest(USER, [('draft', task)]))[0]
     assert result['suggested_action'] == 'REVIEW'
 
@@ -213,3 +213,48 @@ def test_task_rejects_numeric_date_and_datetime_inputs():
         TaskContent(**content(due_date=1795132800))
     with pytest.raises(ValueError):
         TaskContent(**content(due_kind='DATETIME', due_at=1795132800))
+
+def test_matching_service_with_real_agent_adapter(db):
+    import json
+    import httpx
+    from app.adapters.agent_adapter import AgentAdapter, AgentSettings
+    with immediate_write_transaction(db) as session:
+        old = create_task(session, USER, TaskContent(**content(requirements='手机号 13800000000')))
+    extracted = ExtractedTask.model_validate({**content(external_ref=None, requirements=None, due_kind='NONE', due_date=None), 'observed_fields':['title','course_name'], 'uncertain_fields':[], 'reason':'课程任务', 'source_excerpt':'实验报告'})
+    def handle(request):
+        body = json.loads(request.content)
+        payload = json.loads(body['messages'][1]['content'])
+        candidate = payload['items'][0]['candidate_tasks'][0]
+        assert candidate['requirements'] == '[redacted]'
+        output = {'items':[{'draft_item_id':'draft','relation':'SAME','matched_task_id':old['id'],'reason':'同一作业','uncertain_fields':[]}]}
+        return httpx.Response(200, json={'choices':[{'finish_reason':'stop','message':{'content':json.dumps(output)}}]})
+    def redact(candidate):
+        candidate['requirements'] = '[redacted]'
+        return candidate
+    async def run():
+        async with AgentAdapter(AgentSettings('https://model.example/v1','test','model'), transport=httpx.MockTransport(handle)) as agent:
+            return await MatchingService(db, agent, redact).suggest(USER, [('draft', extracted)])
+    result = asyncio.run(run())[0]
+    assert result['suggested_action'] == 'DUPLICATE'
+    assert result['matched_task_id'] == old['id']
+    assert result['match_details']['candidate_tasks'][0]['requirements'] == '手机号 13800000000'
+
+
+def test_matching_service_preserves_agent_error_codes(db):
+    from app.adapters.agent_adapter import LLMInvalidOutput, InputTooComplex
+    with immediate_write_transaction(db) as session:
+        create_task(session, USER, TaskContent(**content()))
+    extracted = ExtractedTask.model_validate({**content(external_ref=None, requirements=None, due_kind='NONE', due_date=None), 'observed_fields':['title','course_name'], 'uncertain_fields':[], 'reason':'课程任务', 'source_excerpt':'safe'})
+    for agent_error, code in [(LLMInvalidOutput('bad'), 'LLM_INVALID_OUTPUT'), (InputTooComplex('large'), 'INPUT_TOO_COMPLEX')]:
+        class Agent:
+            async def match_tasks(self, request):
+                raise agent_error
+        with pytest.raises(Exception, match=code):
+            asyncio.run(MatchingService(db, Agent(), lambda task:task).suggest(USER, [('draft', extracted)]))
+
+def test_extracted_task_rejects_numeric_dates_and_times():
+    data = {**content(), 'observed_fields':['title','course_name','external_ref','deadline','requirements'], 'uncertain_fields':[], 'reason':'明确任务','source_excerpt':'safe'}
+    with pytest.raises(ValueError):
+        ExtractedTask.model_validate({**data, 'due_date':1795132800})
+    with pytest.raises(ValueError):
+        ExtractedTask.model_validate({**data, 'due_kind':'DATETIME', 'due_at':1795132800})

@@ -3,6 +3,7 @@ from difflib import SequenceMatcher
 import anyio
 from app.repositories.task_repository import list_user_task_snapshots
 from app.core.errors import BusinessError
+from app.adapters.agent_adapter import AgentError
 from app.schemas.agent import MatchBatchRequest, MatchBatchResult
 from app.schemas.task import TaskContent
 from app.services.common import canonical_json, normalize
@@ -108,6 +109,15 @@ class MatchingService:
                 raw_response = await self.agent.match_tasks(request)
             except (BusinessError, TimeoutError):
                 raise
+            except AgentError as exc:
+                code = exc.code
+                if code == 'INPUT_TOO_COMPLEX':
+                    raise BusinessError(code, '匹配输入超出限制', 422) from exc
+                if code == 'LLM_INVALID_OUTPUT':
+                    raise BusinessError(code, '语义匹配结果无效', 502) from exc
+                if code == 'AGENT_CONFIGURATION_ERROR':
+                    raise BusinessError('DEPENDENCY_NOT_READY', '语义匹配适配器未就绪', 503) from exc
+                raise BusinessError('LLM_UPSTREAM_ERROR', '语义匹配服务调用失败', 502) from exc
             except Exception as exc:
                 raise BusinessError('LLM_UPSTREAM_ERROR','语义匹配服务调用失败',502) from exc
             try:

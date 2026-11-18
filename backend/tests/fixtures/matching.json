@@ -1,0 +1,39 @@
+{
+  "items": [
+    {
+      "draft_item_id": "00000000-0000-4000-8000-000000000201",
+      "new_task": {
+        "title": "实验报告",
+        "description": null,
+        "course_name": "机器学习",
+        "external_ref": null,
+        "due_kind": "DATE",
+        "due_date": "2026-11-23",
+        "due_at": null,
+        "timezone": "Asia/Shanghai",
+        "requirements": null,
+        "observed_fields": ["title", "course_name", "deadline"],
+        "uncertain_fields": [],
+        "reason": "通知说明原报告延后提交",
+        "source_excerpt": "机器学习实验报告延期至 2026 年 11 月 23 日提交。"
+      },
+      "candidate_tasks": [
+        {
+          "id": "00000000-0000-4000-8000-000000000301",
+          "title": "机器学习实验报告",
+          "description": null,
+          "course_name": "机器学习",
+          "external_ref": null,
+          "due_kind": "DATE",
+          "due_date": "2026-11-20",
+          "due_at": null,
+          "timezone": "Asia/Shanghai",
+          "requirements": "上传 PDF",
+          "version": 2,
+          "created_at": "2026-11-16T09:00:00Z",
+          "updated_at": "2026-11-16T09:00:00Z"
+        }
+      ]
+    }
+  ]
+}

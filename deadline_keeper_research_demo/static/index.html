@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>deadline_keeper 论文检索示例</title>
+<style>
+/* ═══════════════════════════════════════════════════════
+   CSS Variables — 学术配色
+   ═══════════════════════════════════════════════════════ */
+:root {
+  --navy: #0f1d36;
+  --navy-light: #1a365d;
+  --blue: #2c5282;
+  --blue-light: #ebf4ff;
+  --gold: #c2924e;
+  --gold-light: #f7e8d0;
+  --bg: #faf9f7;
+  --surface: #fff;
+  --text: #1a202c;
+  --text-secondary: #4a5568;
+  --text-muted: #a0aec0;
+  --border: #e2e8f0;
+  --green: #38a169;
+  --green-bg: #f0fdf4;
+  --user-bg: #e8f0fe;
+  --user-border: #c4d7f2;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --font: -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  --serif: "Georgia","Noto Serif SC","Songti SC",serif;
+  --mono: "JetBrains Mono","Fira Code",Consolas,monospace;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:var(--font); background:var(--bg); color:var(--text); overflow-x:hidden; }
+
+/* ═══════════════════════════════════════════════════════
+   Landing Page — 艺术感启动页
+   ═══════════════════════════════════════════════════════ */
+#landing {
+  position:fixed; inset:0; z-index:100;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  background: radial-gradient(ellipse at 20% 50%, #1a2740 0%, var(--navy) 50%, #0a1220 100%);
+  transition: opacity .6s ease, transform .6s ease;
+}
+#landing.hidden { opacity:0; transform:scale(1.03); pointer-events:none; }
+
+/* 网格背景纹理 */
+#landing::before {
+  content:''; position:absolute; inset:0; opacity:.04;
+  background-image:
+    linear-gradient(rgba(255,255,255,.3) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.3) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+
+/* 装饰光晕 */
+.orb {
+  position:absolute; border-radius:50%; filter:blur(80px); opacity:.12;
+  animation: float 8s ease-in-out infinite;
+}
+.orb-1 { width:400px; height:400px; background:var(--blue); top:-100px; left:-100px; }
+.orb-2 { width:300px; height:300px; background:var(--gold); bottom:-80px; right:-60px; animation-delay:-4s; }
+@keyframes float {
+  0%,100% { transform:translate(0,0); }
+  50% { transform:translate(20px,-20px); }
+}
+
+/* 内容容器 */
+.landing-content {
+  position:relative; z-index:1; text-align:center; padding:40px; max-width:680px;
+}
+
+/* 主标题 — 大字号有冲击力 */
+.landing-content .accent-line {
+  display:inline-block; width:60px; height:3px; background:var(--gold);
+  margin-bottom:28px; border-radius:2px;
+}
+.landing-content h1 {
+  font-family:var(--serif);
+  font-size:clamp(32px,6vw,56px); font-weight:700; color:#fff;
+  letter-spacing:2px; line-height:1.3; margin-bottom:16px;
+}
+.landing-content h1 .highlight {
+  background:linear-gradient(135deg, var(--gold), #e8c271);
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+.landing-content .subtitle {
+  font-size:15px; color:rgba(255,255,255,.5); letter-spacing:4px;
+  text-transform:uppercase; margin-bottom:48px; font-weight:400;
+}
+
+/* 特性标签 */
+.features {
+  display:flex; gap:12px; flex-wrap:wrap; justify-content:center; margin-bottom:52px;
+}
+.feature-tag {
+  padding:8px 18px; border-radius:24px; font-size:13px; font-weight:500;
+  color:rgba(255,255,255,.7); background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.1); letter-spacing:.5px;
+  transition:all .2s;
+}
+.feature-tag:hover {
+  color:#fff; background:rgba(255,255,255,.12); border-color:rgba(255,255,255,.2);
+}
+
+/* CTA 按钮 */
+.btn-start {
+  display:inline-flex; align-items:center; gap:10px;
+  padding:16px 44px; font-size:16px; font-weight:600; letter-spacing:1px;
+  color:var(--navy); background:linear-gradient(135deg, var(--gold), #d4a34c);
+  border:none; border-radius:32px; cursor:pointer;
+  transition:all .3s ease; box-shadow:0 4px 24px rgba(194,146,78,.35);
+}
+.btn-start:hover {
+  transform:translateY(-2px); box-shadow:0 8px 32px rgba(194,146,78,.5);
+}
+.btn-start:active { transform:scale(.97); }
+
+.landing-content .footer-note {
+  margin-top:40px; font-size:12px; color:rgba(255,255,255,.3);
+}
+
+/* ═══════════════════════════════════════════════════════
+   App — 聊天界面 (默认隐藏)
+   ═══════════════════════════════════════════════════════ */
+#app {
+  display:none; height:100vh; flex-direction:column;
+}
+#app.visible { display:flex; }
+
+/* 顶栏 */
+header {
+  background:linear-gradient(135deg, var(--navy-light), var(--blue));
+  color:#fff; padding:12px 24px; display:flex; align-items:center; gap:10px;
+  flex-shrink:0; box-shadow:0 2px 8px rgba(15,29,54,.2);
+}
+header .logo { font-size:22px; }
+header h1 { font-size:17px; font-weight:600; letter-spacing:.5px; }
+header .badge {
+  margin-left:auto; font-size:11px; background:rgba(255,255,255,.12);
+  padding:4px 10px; border-radius:20px; color:rgba(255,255,255,.8);
+}
+
+/* 聊天容器 */
+#chat-container {
+  flex:1; overflow-y:auto; padding:20px 24px 12px; scroll-behavior:smooth;
+}
+
+/* 用户消息 */
+.message { max-width:82%; margin-bottom:14px; animation:fadeIn .3s ease; }
+@keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+.message.user {
+  margin-left:auto; background:var(--user-bg); border:1px solid var(--user-border);
+  border-radius:var(--radius) var(--radius) 4px var(--radius);
+}
+.message .label { font-size:11px; font-weight:600; padding:8px 14px 0; color:var(--text-muted); }
+.message.user .label { color:#4a6fa5; }
+.message .body { padding:8px 14px 12px; font-size:14.5px; line-height:1.65; white-space:pre-wrap; word-break:break-word; }
+
+/* 节点徽章 */
+.node-badge {
+  display:inline-flex; align-items:center; gap:6px;
+  font-size:12.5px; color:var(--text-secondary); background:#edf2f7;
+  padding:6px 14px; border-radius:20px; margin:4px 0 2px 24px;
+  animation:fadeIn .3s ease;
+}
+.node-badge .dot { width:6px; height:6px; border-radius:50%; background:var(--blue); }
+
+/* ── 进度条 (下载时显示) ── */
+.progress-card {
+  max-width:88%; margin:6px 0 8px 24px; background:var(--surface);
+  border:1px solid var(--border); border-radius:var(--radius-sm);
+  padding:14px 18px; animation:fadeIn .3s ease;
+}
+.progress-card .progress-label {
+  font-size:13px; font-weight:600; color:var(--text-secondary);
+  display:flex; align-items:center; gap:8px; margin-bottom:10px;
+}
+.progress-card .spinner {
+  width:16px; height:16px; border:2px solid var(--border); border-top-color:var(--blue);
+  border-radius:50%; animation:spin .8s linear infinite;
+}
+@keyframes spin { to{transform:rotate(360deg)} }
+.progress-card .progress-bar-track {
+  width:100%; height:6px; background:var(--border); border-radius:3px; overflow:hidden;
+}
+.progress-card .progress-bar-fill {
+  height:100%; background:linear-gradient(90deg, var(--blue), #4a90d9);
+  border-radius:3px; transition:width .3s ease;
+  animation:progressPulse 1.5s ease infinite;
+}
+@keyframes progressPulse {
+  0%,100% { width:20%; }
+  50% { width:85%; }
+}
+
+/* ── 论文卡片 ── */
+.paper-card {
+  max-width:88%; margin:6px 0 8px 24px; background:var(--green-bg);
+  border:1px solid #bbf7d0; border-left:4px solid var(--green);
+  border-radius:0 var(--radius-sm) var(--radius-sm) 0; padding:12px 16px;
+  animation:fadeIn .3s ease;
+}
+.paper-card .card-header { font-size:12px; font-weight:600; color:var(--green); margin-bottom:8px; }
+.paper-card .paper-title { font-weight:600; color:var(--text); margin-bottom:4px; }
+.paper-card .paper-meta { font-size:12.5px; color:var(--text-secondary); margin-bottom:6px; line-height:1.5; }
+.paper-card .paper-abstract { font-size:13px; color:var(--text-secondary); line-height:1.6; overflow:hidden;
+  display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; margin-bottom:8px; }
+.paper-card .paper-links a { color:var(--blue); text-decoration:none; font-weight:500; font-size:13px; }
+.paper-card .paper-links a:hover { text-decoration:underline; }
+
+/* ── 下载卡片 ── */
+.download-card {
+  max-width:88%; margin:6px 0 8px 24px; background:#fefce8;
+  border:1px solid #fde68a; border-left:4px solid #ca8a04;
+  border-radius:0 var(--radius-sm) var(--radius-sm) 0; padding:12px 16px;
+  animation:fadeIn .3s ease;
+}
+.download-card .card-header { font-size:12px; font-weight:600; color:#ca8a04; margin-bottom:4px; }
+.download-card .path { font-size:12.5px; font-family:var(--mono); color:var(--text-secondary); word-break:break-all; }
+.download-card .source-url { font-size:12px; color:var(--blue); margin-top:4px; }
+.download-card .source-url a { color:var(--blue); text-decoration:none; }
+.download-card .source-url a:hover { text-decoration:underline; }
+
+/* ── 最终答案 ── */
+.final-answer {
+  max-width:88%; margin:12px 0 8px 24px;
+  background:linear-gradient(135deg,#f8fafc,#e8f0fe);
+  border:2px solid var(--blue); border-radius:var(--radius); padding:16px 20px;
+  animation:fadeIn .3s ease;
+}
+.final-answer .final-label { font-size:12px; font-weight:700; color:var(--blue); margin-bottom:10px; }
+.final-answer .body { font-size:14.5px; line-height:1.7; }
+
+/* ── 思考指示器 ── */
+#thinking-indicator { display:none; margin:10px 24px; color:var(--text-muted); font-size:13px; }
+#thinking-indicator.visible { display:block; animation:pulse 1.5s ease infinite; }
+@keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:1} }
+
+/* ── 错误 ── */
+.error-banner {
+  max-width:88%; margin:10px 24px; background:#fef2f2; border-left:4px solid #ef4444;
+  border-radius:0 var(--radius-sm) var(--radius-sm) 0; padding:10px 14px;
+  color:#991b1b; font-size:13px;
+}
+
+/* ═══════════════════════════════════════════════════════
+   输入区
+   ═══════════════════════════════════════════════════════ */
+#input-area {
+  flex-shrink:0; padding:12px 24px 16px; background:var(--surface);
+  border-top:1px solid var(--border); display:flex; gap:10px; align-items:flex-end;
+}
+#input-area textarea {
+  flex:1; padding:10px 14px; border:1px solid var(--border); border-radius:var(--radius-sm);
+  font-family:var(--font); font-size:14px; line-height:1.5; resize:none;
+  min-height:44px; max-height:150px; outline:none; transition:border-color .2s;
+}
+#input-area textarea:focus { border-color:var(--blue); box-shadow:0 0 0 3px rgba(44,82,130,.1); }
+#send-btn {
+  padding:10px 20px; background:linear-gradient(135deg,var(--navy-light),var(--blue));
+  color:#fff; border:none; border-radius:var(--radius-sm); font-size:14px; font-weight:600;
+  cursor:pointer; transition:opacity .2s,transform .1s; white-space:nowrap;
+}
+#send-btn:hover { opacity:.9; }
+#send-btn:active { transform:scale(.97); }
+#send-btn:disabled { opacity:.5; cursor:not-allowed; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════
+   LANDING PAGE
+   ═══════════════════════════════════════════════════════ -->
+<div id="landing">
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="landing-content">
+    <div class="accent-line"></div>
+    <h1>
+      探索<span class="highlight">科学</span>的<br>无限可能
+    </h1>
+    <p class="subtitle">AI-Powered Scientific Research Agent</p>
+    <div class="features">
+      <span class="feature-tag">🔬 智能检索</span>
+      <span class="feature-tag">📄 PDF解析</span>
+      <span class="feature-tag">🌐 多源覆盖</span>
+      <span class="feature-tag">🤖 AI分析</span>
+      <span class="feature-tag">📊 引用追踪</span>
+      <span class="feature-tag">🌍 学术翻译</span>
+    </div>
+    <button class="btn-start" onclick="startApp()">
+      开始研究
+      <span style="font-size:18px;">→</span>
+    </button>
+    <p class="footer-note">DeepSeek × LangGraph · 200M+ 学术论文</p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+   CHAT APP
+   ═══════════════════════════════════════════════════════ -->
+<div id="app">
+  <header>
+    <span class="logo">📚</span>
+    <h1>deadline_keeper 论文检索示例</h1>
+    <span class="badge">DeepSeek + LangGraph</span>
+  </header>
+  <div id="chat-container">
+    <div id="thinking-indicator">⏳ 思考中</div>
+  </div>
+  <div id="input-area">
+    <textarea id="user-input" placeholder="输入你的研究问题… (Ctrl+Enter 发送)" rows="1"></textarea>
+    <button id="send-btn" onclick="sendMessage()">发送</button>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════
+   启动/过渡逻辑
+   ═══════════════════════════════════════════════════════ */
+function startApp() {
+  const landing = document.getElementById('landing');
+  const app = document.getElementById('app');
+  landing.classList.add('hidden');
+  app.classList.add('visible');
+  setTimeout(() => landing.remove(), 600);
+  document.getElementById('user-input').focus();
+}
+
+/* ═══════════════════════════════════════════════════════
+   State
+   ═══════════════════════════════════════════════════════ */
+const chatContainer = document.getElementById('chat-container');
+const thinkingEl = document.getElementById('thinking-indicator');
+const textarea = document.getElementById('user-input');
+const sendBtn = document.getElementById('send-btn');
+let isProcessing = false;
+let renderedPapers = new Set();
+let activeProgressBar = null; // 当前进度条 DOM 元素
+
+/* ═══════════════════════════════════════════════════════
+   Helpers
+   ═══════════════════════════════════════════════════════ */
+function scroll() { chatContainer.scrollTop = chatContainer.scrollHeight; }
+function showThinking() { thinkingEl.classList.add('visible'); scroll(); }
+function hideThinking() { thinkingEl.classList.remove('visible'); }
+
+function setProcessing(v) {
+  isProcessing = v; textarea.disabled = v; sendBtn.disabled = v;
+  sendBtn.textContent = v ? '处理中…' : '发送';
+}
+
+function escapeHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* ═══════════════════════════════════════════════════════
+   Paper detection
+   ═══════════════════════════════════════════════════════ */
+function isPaperTool(msg) {
+  return ['search-papers','arxiv-search','semantic-scholar'].includes(msg.tool_name);
+}
+function isDownloadTool(msg) {
+  return msg.tool_name === 'download-paper';
+}
+
+const labelMap = {
+  '标题':'title','作者':'authors','年份':'year','摘要':'abstract',
+  '链接':'urls','发表':'venue','领域':'fields','引用数':'citations',
+  'id':'id','title':'title','authors':'authors','published':'published',
+  'abstract':'abstract','urls':'urls'
+};
+
+function parsePapers(content) {
+  const entries = [];
+  const blocks = content.split(/-----+/);
+  for (const block of blocks) {
+    const entry = {};
+    const lines = block.trim().split('\n');
+    for (const line of lines) {
+      const m = line.match(/^\*\s*(.+?)[:：]\s*(.*)/);
+      if (m) {
+        const rk = m[1].toLowerCase().replace(/\s+/g,'_');
+        entry[labelMap[rk] || labelMap[m[1]] || rk] = m[2];
+      }
+    }
+    if (entry.title) entries.push(entry);
+  }
+  return entries;
+}
+
+/* ═══════════════════════════════════════════════════════
+   Progress bar
+   ═══════════════════════════════════════════════════════ */
+function showProgress(label) {
+  hideProgress(); // 先清除旧的
+  const div = document.createElement('div');
+  div.className = 'progress-card';
+  div.id = 'active-progress';
+  div.innerHTML = `
+    <div class="progress-label">
+      <span class="spinner"></span> ${label}
+    </div>
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill"></div>
+    </div>
+  `;
+  chatContainer.appendChild(div);
+  activeProgressBar = div;
+  scroll();
+}
+
+function hideProgress() {
+  if (activeProgressBar) { activeProgressBar.remove(); activeProgressBar = null; }
+}
+
+/* ═══════════════════════════════════════════════════════
+   Render
+   ═══════════════════════════════════════════════════════ */
+function addUser(text) {
+  const div = document.createElement('div');
+  div.className = 'message user';
+  div.innerHTML = `<div class="label">你</div><div class="body">${escapeHtml(text)}</div>`;
+  chatContainer.appendChild(div);
+  scroll();
+}
+
+function addNodeBadge(label) {
+  const div = document.createElement('div');
+  div.className = 'node-badge';
+  div.innerHTML = `<span class="dot"></span>${label}`;
+  chatContainer.appendChild(div);
+  scroll();
+}
+
+function addPaperCard(entry) {
+  let linkHtml = '';
+  if (entry.urls) {
+    const us = entry.urls.split(/[,\s|]+/).filter(u=>u.startsWith('http'));
+    linkHtml = us.map((u,i)=>`<a href="${escapeHtml(u)}" target="_blank" rel="noopener">🔗 原文链接${us.length>1?' '+String(i+1):''}</a>`).join(' &nbsp; ');
+  }
+  const div = document.createElement('div');
+  div.className = 'paper-card';
+  div.innerHTML = `
+    <div class="card-header">📄 论文检索结果</div>
+    <div class="paper-title">${escapeHtml(entry.title||'')}</div>
+    <div class="paper-meta">
+      ${entry.authors?`✍ ${escapeHtml(entry.authors)} &nbsp;`:''}
+      ${entry.published?`📅 ${escapeHtml(entry.published)}`:''}
+      ${entry.year&&!entry.published?`📅 ${escapeHtml(entry.year)}`:''}
+      ${entry.id?` &nbsp; ID:${escapeHtml(entry.id)}`:''}
+    </div>
+    ${entry.venue?`<div class="paper-meta">📰 ${escapeHtml(entry.venue)}</div>`:''}
+    ${entry.citations?`<div class="paper-meta">📊 引用:${escapeHtml(entry.citations)}次</div>`:''}
+    ${entry.abstract?`<div class="paper-abstract">${escapeHtml(entry.abstract)}</div>`:''}
+    ${linkHtml?`<div class="paper-links">${linkHtml}</div>`:''}
+  `;
+  chatContainer.appendChild(div);
+}
+
+function addDownloadCard(content) {
+  hideProgress(); // 下载完成，隐藏进度条
+  const pathM = content.match(/\[本地保存\]\s*(.+)/);
+  const srcM = content.match(/\[来源\]\s*(.+)/);
+  const pagesM = content.match(/\[页数\]\s*(.+)/);
+  const sizeM = content.match(/\[大小\]\s*(.+)/);
+  const div = document.createElement('div');
+  div.className = 'download-card';
+  div.innerHTML = `
+    <div class="card-header">💾 论文已下载</div>
+    ${pathM?`<div class="path">📁 ${escapeHtml(pathM[1].trim())}</div>`:''}
+    ${srcM?`<div class="source-url">🔗 出处: <a href="${escapeHtml(srcM[1].trim())}" target="_blank" rel="noopener">${escapeHtml(srcM[1].trim())}</a></div>`:''}
+    ${pagesM||sizeM?`<div style="font-size:12px;color:var(--text-secondary);margin-top:4px">${[pagesM?pagesM[1].trim():'',sizeM?sizeM[1].trim():''].filter(Boolean).join(' | ')}</div>`:''}
+  `;
+  chatContainer.appendChild(div);
+  scroll();
+}
+
+function addFinal(content) {
+  hideProgress();
+  hideThinking();
+  if (!content) return;
+  const div = document.createElement('div');
+  div.className = 'final-answer';
+  div.innerHTML = `<div class="final-label">✦ 研究结论</div><div class="body">${escapeHtml(content)}</div>`;
+  chatContainer.appendChild(div);
+  scroll();
+}
+
+function addError(msg) {
+  hideProgress();
+  const div = document.createElement('div');
+  div.className = 'error-banner';
+  div.textContent = '⚠ ' + msg;
+  chatContainer.appendChild(div);
+  scroll();
+}
+
+/* ═══════════════════════════════════════════════════════
+   SSE Stream
+   ═══════════════════════════════════════════════════════ */
+async function sendMessage() {
+  const text = textarea.value.trim();
+  if (!text || isProcessing) return;
+  setProcessing(true);
+  showThinking();
+  textarea.value = '';
+  addUser(text);
+  renderedPapers = new Set();
+
+  try {
+    const resp = await fetch('/chat', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({message:text}),
+    });
+    if (!resp.ok) { addError(`HTTP ${resp.status}`); return; }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const {done,value} = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value,{stream:true});
+      const lines = buf.split('\n');
+      buf = lines.pop()||'';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try { handleEvent(JSON.parse(line.slice(6))); } catch(e){}
+      }
+    }
+    if (buf.startsWith('data: ')) {
+      try { handleEvent(JSON.parse(buf.slice(6))); } catch(e){}
+    }
+  } catch(e) {
+    addError(e.message);
+  } finally {
+    hideThinking();
+    hideProgress();
+    setProcessing(false);
+    scroll();
+  }
+}
+
+function handleEvent(data) {
+  switch (data.event) {
+    case 'user_input': break;
+
+    case 'node_update':
+      hideThinking();
+      addNodeBadge(data.node_label||data.node);
+
+      if (data.requires_research !== undefined) {
+        const d=document.createElement('div');
+        d.className='message user';
+        d.innerHTML=`<div class="body" style="color:var(--text-secondary);font-size:13px">${data.requires_research?'需要检索 → 进入研究流程':'可直接回答'}</div>`;
+        chatContainer.appendChild(d);
+      }
+      if (data.is_good_answer !== undefined) {
+        const d=document.createElement('div');
+        d.className='message user';
+        d.innerHTML=`<div class="body" style="color:var(--text-secondary);font-size:13px">${data.is_good_answer?'✅ 自检通过':'⚠ 需改进，重新规划'}</div>`;
+        chatContainer.appendChild(d);
+      }
+
+      if (data.messages) {
+        for (const msg of data.messages) {
+          if (msg.type === 'tool') {
+            if (isDownloadTool(msg)) {
+              addDownloadCard(msg.content||'');
+            } else if (isPaperTool(msg)) {
+              const entries = parsePapers(msg.content||'');
+              if (entries.length) {
+                for (const e of entries) {
+                  const k = e.title+(e.id||'');
+                  if (!renderedPapers.has(k)) { renderedPapers.add(k); addPaperCard(e); }
+                }
+              } else {
+                // 非标准格式，显示为普通消息
+                addNodeBadge('📄 检索结果');
+              }
+            } else {
+              // 非论文类工具消息：显示内容（截断）
+              hideProgress();
+              const toolDiv = document.createElement('div');
+              toolDiv.className = 'message agent';
+              const toolContent = (msg.content||'').substring(0, 1000);
+              toolDiv.innerHTML = `<div class="body" style="font-size:13px;color:var(--text-secondary);max-height:200px;overflow-y:auto">🔧 <strong>${escapeHtml(msg.tool_name||'tool')}</strong><br>${escapeHtml(toolContent)}</div>`;
+              chatContainer.appendChild(toolDiv);
+            }
+          } else if (msg.type === 'ai') {
+            // AI 文本内容 — 首要：始终显示思考过程
+            if (msg.content && msg.content.trim()) {
+              const aiDiv = document.createElement('div');
+              aiDiv.className = 'message agent';
+              aiDiv.innerHTML = `<div class="body">${escapeHtml(msg.content)}</div>`;
+              chatContainer.appendChild(aiDiv);
+            }
+            // Tool calls — 次要：以 badge 形式展示调用动作
+            if (msg.tool_calls && msg.tool_calls.length > 0) {
+              for (const tc of msg.tool_calls) {
+                const label = tc.name === 'download-paper' ? '⬇ 正在下载论文 PDF...' :
+                              tc.name === 'search-papers' ? '🔍 调用 CORE API 检索论文' :
+                              tc.name === 'arxiv-search' ? '🔍 调用 arXiv API 检索预印本' :
+                              tc.name === 'semantic-scholar' ? '🔍 调用 Semantic Scholar 检索' :
+                              tc.name === 'translate-text' ? '🌐 调用翻译工具' :
+                              `🔧 调用 ${tc.name}`;
+                addNodeBadge(label);
+                if (tc.name === 'download-paper') showProgress('正在下载并解析论文 PDF，请稍候...');
+              }
+            }
+          }
+        }
+      }
+      // 节点处理完毕，显示 thinking 等待下一个节点
+      showThinking();
+      scroll();
+      break;
+
+    case 'done':
+      hideThinking();
+      hideProgress();
+      addFinal(data.final_content);
+      break;
+
+    case 'error':
+      hideThinking();
+      hideProgress();
+      addError(data.message||'未知错误');
+      break;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   Input bindings
+   ═══════════════════════════════════════════════════════ */
+textarea.addEventListener('keydown',e=>{
+  if (e.key==='Enter'&&e.ctrlKey) { e.preventDefault(); sendMessage(); }
+});
+textarea.addEventListener('input',()=>{
+  textarea.style.height='auto';
+  textarea.style.height=Math.min(textarea.scrollHeight,150)+'px';
+});
+</script>
+</body>
+</html>
